@@ -1,5 +1,7 @@
 #!/bin/bash
-# Hugo sing-box 11协议一键管理脚本（改进版）
+# Hugo sing-box 11协议一键管理脚本（最终改进版）
+# 兼容 sing-box 1.12+ / 1.14+ 新 DNS 格式
+# 自动放行防火墙 + 更稳定 Reality SNI
 
 if [ "$EUID" -ne 0 ]; then
   echo "❌ 请使用 root 权限运行！"
@@ -19,17 +21,17 @@ open_firewall() {
 
   if command -v ufw >/dev/null 2>&1; then
     ufw allow 22/tcp >/dev/null 2>&1
-    for p in $PORTS_TCP; do ufw allow $p/tcp >/dev/null 2>&1; done
-    for p in $PORTS_UDP; do ufw allow $p/udp >/dev/null 2>&1; done
+    for p in $PORTS_TCP; do ufw allow ${p}/tcp >/dev/null 2>&1; done
+    for p in $PORTS_UDP; do ufw allow ${p}/udp >/dev/null 2>&1; done
     ufw --force enable >/dev/null 2>&1
     echo "✅ ufw 已放行端口"
   elif command -v firewall-cmd >/dev/null 2>&1; then
-    for p in $PORTS_TCP; do firewall-cmd --permanent --add-port=$p/tcp >/dev/null 2>&1; done
-    for p in $PORTS_UDP; do firewall-cmd --permanent --add-port=$p/udp >/dev/null 2>&1; done
+    for p in $PORTS_TCP; do firewall-cmd --permanent --add-port=${p}/tcp >/dev/null 2>&1; done
+    for p in $PORTS_UDP; do firewall-cmd --permanent --add-port=${p}/udp >/dev/null 2>&1; done
     firewall-cmd --reload >/dev/null 2>&1
     echo "✅ firewalld 已放行端口"
   else
-    echo "⚠️  未检测到 ufw/firewalld，请手动在云厂商安全组放行以下端口："
+    echo "⚠️  未检测到 ufw/firewalld，请手动在云厂商安全组放行："
     echo "   TCP: $PORTS_TCP"
     echo "   UDP: $PORTS_UDP"
   fi
@@ -46,7 +48,7 @@ show_nodes() {
     echo "🔗 通用订阅 (V2rayN / Shadowrocket / v2rayNG):"
     echo "   http://$(curl -s https://api.ipify.org || echo "你的IP"):$SUB_PORT/sub"
     echo ""
-    echo "🍎 Apple / sing-box 专用 JSON 订阅:"
+    echo "🍎 Apple / sing-box 专用 JSON 订阅 (SFI/SFM):"
     echo "   http://$(curl -s https://api.ipify.org || echo "你的IP"):$SUB_PORT/singbox"
     echo "============================================================"
   else
@@ -62,30 +64,35 @@ setup_sub_service() {
 
   cat > /etc/sing-box/sub_server.py << 'PY'
 import http.server, socketserver, os
-PORT=2082
+PORT = 2082
 class H(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
-        if self.path=='/sub':
-            f="/etc/sing-box/sub_b64.txt"
+        if self.path == '/sub':
+            f = "/etc/sing-box/sub_b64.txt"
             if os.path.exists(f):
                 self.send_response(200)
-                self.send_header('Content-type','text/plain; charset=utf-8')
+                self.send_header('Content-type', 'text/plain; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(open(f,'rb').read())
-            else: self.send_error(404)
-        elif self.path in ('/singbox','/sb'):
-            f="/etc/sing-box/sub_singbox.json"
+                self.wfile.write(open(f, 'rb').read())
+            else:
+                self.send_error(404)
+        elif self.path in ('/singbox', '/sb'):
+            f = "/etc/sing-box/sub_singbox.json"
             if os.path.exists(f):
                 self.send_response(200)
-                self.send_header('Content-type','application/json; charset=utf-8')
+                self.send_header('Content-type', 'application/json; charset=utf-8')
                 self.end_headers()
-                self.wfile.write(open(f,'rb').read())
-            else: self.send_error(404)
-        else: self.send_error(403)
-    def log_message(self,*a): pass
-if __name__=="__main__":
-    socketserver.TCPServer.allow_reuse_address=True
-    with socketserver.TCPServer(("",PORT),H) as httpd: httpd.serve_forever()
+                self.wfile.write(open(f, 'rb').read())
+            else:
+                self.send_error(404)
+        else:
+            self.send_error(403)
+    def log_message(self, *a):
+        pass
+if __name__ == "__main__":
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("", PORT), H) as httpd:
+        httpd.serve_forever()
 PY
 
   cat > /etc/systemd/system/hugo-sub.service << 'SVC'
@@ -161,7 +168,6 @@ install_nodes() {
   PROXY_USER="hugo"
   PROXY_PASS=$(openssl rand -hex 6)
   SHORT_ID="0123456789abcdef"
-  # 使用更稳定的 SNI
   SNI="www.microsoft.com"
 
   IP=$(curl -s --connect-timeout 5 https://api.ipify.org)
@@ -171,20 +177,32 @@ install_nodes() {
   echo "==> 3. 写入配置文件..."
   cat > /etc/sing-box/config.json << EOF
 {
-  "log": {"level": "info", "timestamp": true},
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
   "inbounds": [
     {
       "type": "vless",
       "tag": "vless-tcp",
       "listen": "::",
       "listen_port": 443,
-      "users": [{"name": "hugo-tcp", "uuid": "$UUID", "flow": "xtls-rprx-vision"}],
+      "users": [
+        {
+          "name": "hugo-tcp",
+          "uuid": "$UUID",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
         "reality": {
           "enabled": true,
-          "handshake": {"server": "$SNI", "server_port": 443},
+          "handshake": {
+            "server": "$SNI",
+            "server_port": 443
+          },
           "private_key": "$PRIV_KEY",
           "short_id": ["$SHORT_ID"]
         }
@@ -195,31 +213,51 @@ install_nodes() {
       "tag": "vless-grpc",
       "listen": "::",
       "listen_port": 444,
-      "users": [{"name": "hugo-grpc", "uuid": "$UUID"}],
+      "users": [
+        {
+          "name": "hugo-grpc",
+          "uuid": "$UUID"
+        }
+      ],
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
         "reality": {
           "enabled": true,
-          "handshake": {"server": "$SNI", "server_port": 443},
+          "handshake": {
+            "server": "$SNI",
+            "server_port": 443
+          },
           "private_key": "$PRIV_KEY",
           "short_id": ["$SHORT_ID"]
         }
       },
-      "transport": {"type": "grpc", "service_name": "hugogrpc"}
+      "transport": {
+        "type": "grpc",
+        "service_name": "hugogrpc"
+      }
     },
     {
       "type": "vless",
       "tag": "xtls-reality-extra",
       "listen": "::",
       "listen_port": 8881,
-      "users": [{"name": "hugo-xtls-8881", "uuid": "$UUID", "flow": "xtls-rprx-vision"}],
+      "users": [
+        {
+          "name": "hugo-xtls-8881",
+          "uuid": "$UUID",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
         "reality": {
           "enabled": true,
-          "handshake": {"server": "$SNI", "server_port": 443},
+          "handshake": {
+            "server": "$SNI",
+            "server_port": 443
+          },
           "private_key": "$PRIV_KEY",
           "short_id": ["$SHORT_ID"]
         }
@@ -230,14 +268,25 @@ install_nodes() {
       "tag": "vmess-in",
       "listen": "::",
       "listen_port": 3443,
-      "users": [{"name": "hugo-vmess", "uuid": "$VMESS_UUID", "alterId": 0}]
+      "users": [
+        {
+          "name": "hugo-vmess",
+          "uuid": "$VMESS_UUID",
+          "alterId": 0
+        }
+      ]
     },
     {
       "type": "trojan",
       "tag": "anytls-in",
       "listen": "::",
       "listen_port": 10000,
-      "users": [{"name": "hugo-anytls", "password": "$ANYTLS_PASS"}],
+      "users": [
+        {
+          "name": "hugo-anytls",
+          "password": "$ANYTLS_PASS"
+        }
+      ],
       "tls": {
         "enabled": true,
         "certificate_path": "/etc/sing-box/hy2.crt",
@@ -249,7 +298,11 @@ install_nodes() {
       "tag": "hy2-in",
       "listen": "::",
       "listen_port": 8443,
-      "users": [{"password": "$HY2_PASS"}],
+      "users": [
+        {
+          "password": "$HY2_PASS"
+        }
+      ],
       "masquerade": "https://bing.com",
       "tls": {
         "enabled": true,
@@ -263,7 +316,12 @@ install_nodes() {
       "tag": "tuic-in",
       "listen": "::",
       "listen_port": 9443,
-      "users": [{"uuid": "$UUID", "password": "$TUIC_PASS"}],
+      "users": [
+        {
+          "uuid": "$UUID",
+          "password": "$TUIC_PASS"
+        }
+      ],
       "congestion_control": "bbr",
       "tls": {
         "enabled": true,
@@ -293,7 +351,12 @@ install_nodes() {
       "tag": "trojan-in",
       "listen": "::",
       "listen_port": 7443,
-      "users": [{"name": "hugo-trojan", "password": "$TROJAN_PASS"}],
+      "users": [
+        {
+          "name": "hugo-trojan",
+          "password": "$TROJAN_PASS"
+        }
+      ],
       "tls": {
         "enabled": true,
         "certificate_path": "/etc/sing-box/hy2.crt",
@@ -305,10 +368,20 @@ install_nodes() {
       "tag": "mixed-in",
       "listen": "::",
       "listen_port": 5443,
-      "users": [{"username": "$PROXY_USER", "password": "$PROXY_PASS"}]
+      "users": [
+        {
+          "username": "$PROXY_USER",
+          "password": "$PROXY_PASS"
+        }
+      ]
     }
   ],
-  "outbounds": [{"type": "direct", "tag": "direct"}]
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
 }
 EOF
 
@@ -322,7 +395,6 @@ EOF
   systemctl restart sing-box
   sleep 2
 
-  # 检查服务状态
   if systemctl is-active --quiet sing-box; then
     echo "✅ sing-box 服务运行正常"
   else
@@ -330,9 +402,8 @@ EOF
     return 1
   fi
 
-  # 检查监听端口
   echo "==> 检查监听端口..."
-  ss -tulnp | grep -E ':(443|444|8881|3443|10000|8443|9443|6443|6555|7443|5443)\s' || echo "⚠️  部分端口未监听，请检查"
+  ss -tulnp | grep -E ':(443|444|8881|3443|10000|8443|9443|6443|6555|7443|5443)\s' || echo "⚠️  部分端口未监听"
 
   # 生成节点链接
   VLESS_TCP="vless://$UUID@$IP:443?encryption=none&flow=xtls-rprx-vision&security=reality&sni=$SNI&fp=chrome&pbk=$PUB_KEY&sid=$SHORT_ID&type=tcp#Hugo-Reality-TCP"
@@ -403,16 +474,31 @@ $TROJAN_LINK
 $SOCKS_LINK"
   echo -n "$RAW_SUBS" | base64 -w0 2>/dev/null > "$SUB_FILE" || echo -n "$RAW_SUBS" | base64 | tr -d '\n' > "$SUB_FILE"
 
-  # Apple JSON 订阅
+  # ==================== Apple / sing-box 专用 JSON 订阅（新 DNS 格式） ====================
   cat > "$SB_JSON_FILE" << SBJSON
 {
-  "log": {"level": "info", "timestamp": true},
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
   "dns": {
     "servers": [
-      {"tag": "google", "address": "8.8.8.8"},
-      {"tag": "local", "address": "local", "detour": "direct"}
+      {
+        "type": "udp",
+        "tag": "google",
+        "server": "8.8.8.8"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
     ],
-    "rules": [{"outbound": "any", "server": "local"}],
+    "rules": [
+      {
+        "outbound": "any",
+        "server": "local"
+      }
+    ],
     "final": "google",
     "strategy": "prefer_ipv4"
   },
@@ -420,8 +506,8 @@ $SOCKS_LINK"
     {
       "type": "tun",
       "tag": "tun-in",
-      "interface_name": "singtun0",
-      "inet4_address": "172.19.0.1/30",
+      "interface_name": "sing-tun",
+      "address": ["172.19.0.1/30"],
       "mtu": 9000,
       "auto_route": true,
       "strict_route": true,
@@ -433,15 +519,41 @@ $SOCKS_LINK"
     {
       "type": "selector",
       "tag": "proxy",
-      "outbounds": ["auto","Hugo-Reality-TCP","Hugo-Reality-gRPC","Hugo-XTLS-Reality-8881","Hugo-VMess","Hugo-AnyTLS","Hugo-Hysteria2","Hugo-TuicV5","Hugo-Shadowsocks-2022","Hugo-Shadowsocks-Classic","Hugo-Trojan","Hugo-Socks5-Mixed","direct"],
+      "outbounds": [
+        "auto",
+        "Hugo-Reality-TCP",
+        "Hugo-Reality-gRPC",
+        "Hugo-XTLS-Reality-8881",
+        "Hugo-VMess",
+        "Hugo-AnyTLS",
+        "Hugo-Hysteria2",
+        "Hugo-TuicV5",
+        "Hugo-Shadowsocks-2022",
+        "Hugo-Shadowsocks-Classic",
+        "Hugo-Trojan",
+        "Hugo-Socks5-Mixed",
+        "direct"
+      ],
       "default": "auto"
     },
     {
       "type": "urltest",
       "tag": "auto",
-      "outbounds": ["Hugo-Reality-TCP","Hugo-Reality-gRPC","Hugo-XTLS-Reality-8881","Hugo-VMess","Hugo-AnyTLS","Hugo-Hysteria2","Hugo-TuicV5","Hugo-Shadowsocks-2022","Hugo-Shadowsocks-Classic","Hugo-Trojan","Hugo-Socks5-Mixed"],
+      "outbounds": [
+        "Hugo-Reality-TCP",
+        "Hugo-Reality-gRPC",
+        "Hugo-XTLS-Reality-8881",
+        "Hugo-VMess",
+        "Hugo-AnyTLS",
+        "Hugo-Hysteria2",
+        "Hugo-TuicV5",
+        "Hugo-Shadowsocks-2022",
+        "Hugo-Shadowsocks-Classic",
+        "Hugo-Trojan",
+        "Hugo-Socks5-Mixed"
+      ],
       "url": "https://www.gstatic.com/generate_204",
-      "interval": "5m",
+      "interval": "10m",
       "tolerance": 50
     },
     {
@@ -454,8 +566,15 @@ $SOCKS_LINK"
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
-        "utls": {"enabled": true, "fingerprint": "chrome"},
-        "reality": {"enabled": true, "public_key": "$PUB_KEY", "short_id": "$SHORT_ID"}
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
       }
     },
     {
@@ -467,10 +586,20 @@ $SOCKS_LINK"
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
-        "utls": {"enabled": true, "fingerprint": "chrome"},
-        "reality": {"enabled": true, "public_key": "$PUB_KEY", "short_id": "$SHORT_ID"}
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
       },
-      "transport": {"type": "grpc", "service_name": "hugogrpc"}
+      "transport": {
+        "type": "grpc",
+        "service_name": "hugogrpc"
+      }
     },
     {
       "type": "vless",
@@ -482,8 +611,15 @@ $SOCKS_LINK"
       "tls": {
         "enabled": true,
         "server_name": "$SNI",
-        "utls": {"enabled": true, "fingerprint": "chrome"},
-        "reality": {"enabled": true, "public_key": "$PUB_KEY", "short_id": "$SHORT_ID"}
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
       }
     },
     {
@@ -501,7 +637,11 @@ $SOCKS_LINK"
       "server": "$IP",
       "server_port": 10000,
       "password": "$ANYTLS_PASS",
-      "tls": {"enabled": true, "server_name": "bing.com", "insecure": true}
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true
+      }
     },
     {
       "type": "hysteria2",
@@ -509,7 +649,12 @@ $SOCKS_LINK"
       "server": "$IP",
       "server_port": 8443,
       "password": "$HY2_PASS",
-      "tls": {"enabled": true, "server_name": "bing.com", "insecure": true, "alpn": ["h3"]}
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true,
+        "alpn": ["h3"]
+      }
     },
     {
       "type": "tuic",
@@ -519,7 +664,12 @@ $SOCKS_LINK"
       "uuid": "$UUID",
       "password": "$TUIC_PASS",
       "congestion_control": "bbr",
-      "tls": {"enabled": true, "server_name": "bing.com", "insecure": true, "alpn": ["h3"]}
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true,
+        "alpn": ["h3"]
+      }
     },
     {
       "type": "shadowsocks",
@@ -543,7 +693,11 @@ $SOCKS_LINK"
       "server": "$IP",
       "server_port": 7443,
       "password": "$TROJAN_PASS",
-      "tls": {"enabled": true, "server_name": "bing.com", "insecure": true}
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true
+      }
     },
     {
       "type": "socks",
@@ -554,18 +708,34 @@ $SOCKS_LINK"
       "password": "$PROXY_PASS",
       "version": "5"
     },
-    {"type": "direct", "tag": "direct"},
-    {"type": "block", "tag": "block"}
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
   ],
   "route": {
     "rules": [
-      {"protocol": "dns", "outbound": "direct"},
-      {"ip_is_private": true, "outbound": "direct"}
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      }
     ],
     "final": "proxy",
     "auto_detect_interface": true
   },
-  "experimental": {"cache_file": {"enabled": true}}
+  "experimental": {
+    "cache_file": {
+      "enabled": true
+    }
+  }
 }
 SBJSON
 
@@ -577,9 +747,9 @@ SBJSON
   show_nodes
   echo ""
   echo "【重要提示】"
-  echo "1. 请务必在云厂商控制台安全组放行上述 TCP/UDP 端口"
+  echo "1. 请务必在云厂商控制台安全组放行上述 TCP/UDP 端口（尤其是 2082）"
   echo "2. 如果节点仍然全是 -1，执行以下命令排查："
-  echo "   systemctl status sing-box"
+  echo "   systemctl status sing-box --no-pager"
   echo "   journalctl -u sing-box -n 50 --no-pager"
   echo "   ss -tulnp | grep sing-box"
 }
@@ -595,7 +765,7 @@ if [ "$1" = "uninstall" ] || [ "$1" = "3" ]; then
 fi
 
 echo "============================================================"
-echo "          Hugo sing-box 多协议一键管理脚本（改进版）"
+echo "          Hugo sing-box 多协议一键管理脚本（最终改进版）"
 echo "============================================================"
 echo "  1. 查看当前节点信息及订阅链接"
 echo "  2. 全新部署 / 重置 11 大协议节点"
