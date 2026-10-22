@@ -156,6 +156,7 @@ install_nodes() {
     # 生成通用凭证
     UUID=$(cat /proc/sys/kernel/random/uuid)
     VMESS_UUID=$(cat /proc/sys/kernel/random/uuid)
+    ANYTLS_PASS=$(cat /proc/sys/kernel/random/uuid)
     HY2_PASS=$(cat /proc/sys/kernel/random/uuid | cut -d'-' -f1)
     TUIC_PASS=$(cat /proc/sys/kernel/random/uuid)
     SS_PASS=$(openssl rand -base64 16)
@@ -280,6 +281,23 @@ install_nodes() {
       ]
     },
     {
+      "type": "trojan",
+      "tag": "anytls-in",
+      "listen": "0.0.0.0",
+      "listen_port": 10000,
+      "users": [
+        {
+          "name": "hugo-anytls",
+          "password": "$ANYTLS_PASS"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/etc/sing-box/hy2.crt",
+        "key_path": "/etc/sing-box/hy2.key"
+      }
+    },
+    {
       "type": "hysteria2",
       "tag": "hy2-in",
       "listen": "0.0.0.0",
@@ -356,18 +374,6 @@ install_nodes() {
           "password": "$PROXY_PASS"
         }
       ]
-    },
-    {
-      "type": "http",
-      "tag": "http-in",
-      "listen": "0.0.0.0",
-      "listen_port": 5555,
-      "users": [
-        {
-          "username": "$PROXY_USER",
-          "password": "$PROXY_PASS"
-        }
-      ]
     }
   ],
   "outbounds": [
@@ -394,11 +400,11 @@ CONFIG
     VMESS_JSON="{\"v\":\"2\",\"ps\":\"Hugo-VMess\",\"add\":\"$IP\",\"port\":\"3443\",\"id\":\"$VMESS_UUID\",\"aid\":\"0\",\"scy\":\"auto\",\"net\":\"tcp\",\"type\":\"none\",\"host\":\"\",\"path\":\"\",\"tls\":\"\"}"
     VMESS_LINK="vmess://$(echo -n "$VMESS_JSON" | base64 | tr -d '\n')"
 
+    ANYTLS_LINK="trojan://$ANYTLS_PASS@$IP:10000?security=tls&allowInsecure=1#Hugo-AnyTLS"
     HY2_LINK="hysteria2://$HY2_PASS@$IP:8443?insecure=1&sni=bing.com#Hugo-Hysteria2"
     TUIC_LINK="tuic://$UUID:$TUIC_PASS@$IP:9443?congestion_control=bbr&alpn=h3&allow_insecure=1#Hugo-TuicV5"
     TROJAN_LINK="trojan://$TROJAN_PASS@$IP:7443?security=tls&allowInsecure=1#Hugo-Trojan"
-    SOCKS_LINK="socks5://$PROXY_USER:$PROXY_PASS@$IP:5443#Hugo-Socks5"
-    HTTP_LINK="http://$PROXY_USER:$PROXY_PASS@$IP:5555#Hugo-HTTP"
+    SOCKS_LINK="socks://$PROXY_USER:$PROXY_PASS@$IP:5443#Hugo-Socks5-Mixed"
 
     SS_RAW="2022-blake3-aes-128-gcm:$SS_PASS"
     SS_ENCODED=$(echo -n "$SS_RAW" | base64 | tr -d '\n')
@@ -418,23 +424,23 @@ $XTLS_EXTRA
 [4] VMess (3443):
 $VMESS_LINK
 ------------------------------------------------------------
-[5] Hysteria 2 (8443):
+[5] AnyTLS (10000):
+$ANYTLS_LINK
+------------------------------------------------------------
+[6] Hysteria 2 (8443):
 $HY2_LINK
 ------------------------------------------------------------
-[6] TUIC v5 (9443):
+[7] TUIC v5 (9443):
 $TUIC_LINK
 ------------------------------------------------------------
-[7] Shadowsocks 2022 (6443):
+[8] Shadowsocks 2022 (6443):
 $SS_LINK
 ------------------------------------------------------------
-[8] Trojan (7443):
+[9] Trojan (7443):
 $TROJAN_LINK
 ------------------------------------------------------------
-[9] SOCKS5 Mixed (5443):
+[10] SOCKS5/HTTP Mixed (5443):
 $SOCKS_LINK
-------------------------------------------------------------
-[10] HTTP Proxy (5555):
-$HTTP_LINK
 ============================================================
 LINKS
 
@@ -443,12 +449,12 @@ LINKS
 $VLESS_GP
 $XTLS_EXTRA
 $VMESS_LINK
+$ANYTLS_LINK
 $HY2_LINK
 $TUIC_LINK
 $SS_LINK
 $TROJAN_LINK
-$SOCKS_LINK
-$HTTP_LINK"
+$SOCKS_LINK"
     
     echo -n "$RAW_SUBS" | base64 | tr -d '\n' > "$SUB_FILE"
 
