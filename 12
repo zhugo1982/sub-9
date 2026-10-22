@@ -483,4 +483,20 @@ $SS_LINK
 [10] Shadowsocks Classic (6555):
 $SS_CLASSIC_LINK
 ------------------------------------------------------------
-[11] Trojan (74
+[11] Trojan (7443):
+$TROJAN_LINK
+------------------------------------------------------------
+[12] SOCKS5/HTTP Mixed (5443):
+$SOCKS_LINK
+============================================================
+LINKS
+
+    # 生成 Base64 订阅文件
+    RAW_SUBS="$VLESS_TCP$VLESS_GP
+$XTLS_EXTRA$VMESS_LINK
+$ANYTLS_LINK$STLS_LINK
+$HY2_LINK$TUIC_LINK
+$SS_LINK$SS_CLASSIC_LINK
+$TROJAN_LINK$SOCKS_LINK"
+    
+    echo -n "$RAW_SUBS" \vert{} base64 \vert{} tr -d '\n' > "$
