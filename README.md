@@ -15,6 +15,7 @@ Shadowsocks 2022（端口 6443）：使用 2022-blake3-aes-128-gcm 加密算法�
 Trojan（端口 7443）：传统的 TLS 代理协议。
 
 SOCKS5 / HTTP Mixed（端口 5443）：通用的混合代理端口，支持用户名和密码认证。
+```
 9协议
 ```
 curl -sSL https://raw.githubusercontent.com/zhugo1982/sub-9/refs/heads/main/sub -o /usr/local/bin/sub && chmod +x /usr/local/bin/sub; sub
