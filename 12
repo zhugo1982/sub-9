@@ -310,15 +310,7 @@ install_nodes() {
           "password": "$STLS_PASS"
         }
       ],
-      "detour": "ss-stls-local"
-    },
-    {
-      "type": "shadowsocks",
-      "tag": "ss-stls-local",
-      "listen": "127.0.0.1",
-      "listen_port": 10086,
-      "method": "aes-128-gcm",
-      "password": "$STLS_PASS"
+      "detour": "ss-stls-out"
     },
     {
       "type": "hysteria2",
@@ -411,6 +403,14 @@ install_nodes() {
     {
       "type": "direct",
       "tag": "direct"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "ss-stls-out",
+      "server": "127.0.0.1",
+      "server_port": 8444,
+      "method": "aes-128-gcm",
+      "password": "$STLS_PASS"
     }
   ]
 }
@@ -439,4 +439,48 @@ CONFIG
     STLS_LINK="ss://$STLS_ENCODED@$IP:8444?plugin=shadow-tls\%3Bversion\%3D3\%3Bpassword\%3D$STLS_PASS%3Bsni%3Dbing.com#Hugo-ShadowTLS"
 
     HY2_LINK="hysteria2://$HY2_PASS@$IP:8443?insecure=1&sni=bing.com#Hugo-Hysteria2"
-    TUIC_LINK="tuic://$UUID:$TUIC_PASS@$IP:9443?congestion_control=bbr&alpn=h3&allow_
+    TUIC_LINK="tuic://$UUID:$TUIC_PASS@$IP:9443?congestion_control=bbr&alpn=h3&allow_insecure=1#Hugo-TuicV5"
+    TROJAN_LINK="trojan://$TROJAN_PASS@$IP:7443?security=tls&allowInsecure=1#Hugo-Trojan"
+    SOCKS_LINK="socks://$PROXY_USER:$PROXY_PASS@$IP:5443#Hugo-Socks5-Mixed"
+
+    SS_2022_RAW="2022-blake3-aes-128-gcm:$SS_PASS"
+    SS_2022_ENCODED=$(echo -n "$SS_2022_RAW" | base64 | tr -d '\n')
+    SS_LINK="ss://$SS_2022_ENCODED@$IP:6443#Hugo-Shadowsocks-2022"
+
+    SS_CLASSIC_RAW="aes-256-gcm:$SS_CLASSIC_PASS"
+    SS_CLASSIC_ENCODED=$(echo -n "$SS_CLASSIC_RAW" | base64 | tr -d '\n')
+    SS_CLASSIC_LINK="ss://$SS_CLASSIC_ENCODED@$IP:6555#Hugo-Shadowsocks-Classic"
+
+    # 持久化存储到明文文本
+    cat > "$LOG_FILE" << LINKS
+[1] VLESS-Reality-TCP (443):
+$VLESS_TCP
+------------------------------------------------------------
+[2] VLESS-Reality-gRPC (444):
+$VLESS_GP
+------------------------------------------------------------
+[3] XTLS-Reality-Extra (8881):
+$XTLS_EXTRA
+------------------------------------------------------------
+[4] VMess (3443):
+$VMESS_LINK
+------------------------------------------------------------
+[5] AnyTLS (10000):
+$ANYTLS_LINK
+------------------------------------------------------------
+[6] ShadowTLS (8444):
+$STLS_LINK
+------------------------------------------------------------
+[7] Hysteria 2 (8443):
+$HY2_LINK
+------------------------------------------------------------
+[8] TUIC v5 (9443):
+$TUIC_LINK
+------------------------------------------------------------
+[9] Shadowsocks 2022 (6443):
+$SS_LINK
+------------------------------------------------------------
+[10] Shadowsocks Classic (6555):
+$SS_CLASSIC_LINK
+------------------------------------------------------------
+[11] Trojan (74
