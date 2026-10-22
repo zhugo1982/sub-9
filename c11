@@ -1,0 +1,85 @@
+#!/bin/bash
+set -euo pipefail
+if [ "$(id -u)" -ne 0 ]; then echo '请使用 root 权限运行'; exit 1; fi
+BASE=/etc/sing-box
+LOG="$BASE/sub_links.txt"
+SUB="$BASE/sub_b64.txt"
+PY="$BASE/sub_server.py"
+[ -s "$LOG" ] && [ -s "$SUB" ] || { echo "缺少现有订阅文件，未做任何修改。请勿运行全新部署。"; exit 1; }
+[ -f "$PY" ] && cp -a "$PY" "$PY.bak.$(date +%Y%m%d%H%M%S)" || true
+cat > "$PY" <<'PYEOF'
+import http.server, socketserver, os, json, base64, urllib.parse, re
+PORT=2082; LINKS='/etc/sing-box/sub_links.txt'; SUB='/etc/sing-box/sub_b64.txt'
+def dec(s):
+ s=urllib.parse.unquote(s); s+='='*((4-len(s)%4)%4); return base64.urlsafe_b64decode(s.encode()).decode('utf-8','replace')
+def parse(link):
+ link=link.strip(); scheme=link.split('://',1)[0].lower(); tag=urllib.parse.unquote(link.split('#',1)[1]) if '#' in link else scheme
+ if scheme=='vmess':
+  o=json.loads(dec(link[8:].split('#')[0])); x={'type':'vmess','tag':tag,'server':o['add'],'server_port':int(o['port']),'uuid':o['id'],'security':o.get('scy') or 'auto'}
+  if str(o.get('tls','')).lower()=='tls': x['tls']={'enabled':True,'server_name':o.get('sni') or o.get('host') or o['add']}
+  if o.get('net')=='grpc': x['transport']={'type':'grpc','service_name':o.get('path','')}
+  elif o.get('net')=='ws': x['transport']={'type':'ws','path':o.get('path') or '/'}
+  return x
+ u=urllib.parse.urlsplit(link); q=urllib.parse.parse_qs(u.query); host=u.hostname; port=u.port
+ if not host or not port: return None
+ if scheme=='vless':
+  x={'type':'vless','tag':tag,'server':host,'server_port':port,'uuid':urllib.parse.unquote(u.username or '')}; flow=(q.get('flow') or [''])[0]
+  if flow: x['flow']=flow
+  sec=(q.get('security') or [''])[0]
+  if sec=='reality': x['tls']={'enabled':True,'server_name':(q.get('sni') or [host])[0],'utls':{'enabled':True,'fingerprint':(q.get('fp') or ['chrome'])[0]},'reality':{'enabled':True,'public_key':(q.get('pbk') or [''])[0],'short_id':(q.get('sid') or [''])[0]}}
+  elif sec=='tls': x['tls']={'enabled':True,'server_name':(q.get('sni') or [host])[0]}
+  typ=(q.get('type') or ['tcp'])[0]
+  if typ=='grpc': x['transport']={'type':'grpc','service_name':(q.get('serviceName') or [''])[0]}
+  return x
+ if scheme=='trojan': return {'type':'trojan','tag':tag,'server':host,'server_port':port,'password':urllib.parse.unquote(u.username or ''),'tls':{'enabled':True,'server_name':(q.get('sni') or [host])[0],'insecure':(q.get('allowInsecure') or [''])[0].lower() in ('1','true')}}
+ if scheme in ('hysteria2','hy2'): return {'type':'hysteria2','tag':tag,'server':host,'server_port':port,'password':urllib.parse.unquote(u.username or ''),'tls':{'enabled':True,'server_name':(q.get('sni') or [host])[0],'insecure':(q.get('insecure') or [''])[0].lower() in ('1','true')}}
+ if scheme=='tuic': return {'type':'tuic','tag':tag,'server':host,'server_port':port,'uuid':urllib.parse.unquote(u.username or ''),'password':urllib.parse.unquote(u.password or ''),'congestion_control':(q.get('congestion_control') or ['bbr'])[0],'tls':{'enabled':True,'server_name':(q.get('sni') or [host])[0],'alpn':(q.get('alpn') or ['h3'])[0].split(','),'insecure':(q.get('allow_insecure') or [''])[0].lower() in ('1','true')}}
+ if scheme=='ss':
+  ui=u.netloc.rsplit('@',1)[0]
+  try: cred=dec(ui)
+  except Exception: cred=urllib.parse.unquote(ui)
+  if ':' in cred: method,pw=cred.split(':',1)
+  else: method,pw=(q.get('method') or ['aes-256-gcm'])[0],urllib.parse.unquote(u.username or '')
+  return {'type':'shadowsocks','tag':tag,'server':host,'server_port':port,'method':method,'password':pw}
+ if scheme in ('socks','socks5'):
+  x={'type':'socks','tag':tag,'server':host,'server_port':port}
+  if u.username: x['username']=urllib.parse.unquote(u.username)
+  if u.password: x['password']=urllib.parse.unquote(u.password)
+  return x
+ return None
+def config():
+ links=[]
+ with open(LINKS,encoding='utf-8',errors='replace') as f:
+  for line in f:
+   line=line.strip()
+   if re.match(r'^(vless|vmess|trojan|hysteria2|hy2|tuic|ss|socks|socks5)://',line,re.I): links.append(line)
+ obs=[]
+ for l in links:
+  try:
+   x=parse(l)
+   if x: obs.append(x)
+  except Exception: pass
+ if not obs: raise ValueError('无法从 sub_links.txt 解析节点')
+ tags=[x['tag'] for x in obs]; obs += [{'type':'direct','tag':'direct'},{'type':'selector','tag':'节点选择','outbounds':tags+['direct'],'default':tags[0]}]
+ return {'log':{'level':'info'},'inbounds':[{'type':'mixed','tag':'mixed-in','listen':'127.0.0.1','listen_port':20808}],'outbounds':obs,'route':{'auto_detect_interface':True,'final':'节点选择'}}
+class H(http.server.BaseHTTPRequestHandler):
+ def do_GET(self):
+  p=self.path.split('?',1)[0]
+  try:
+   if p=='/sub': data=open(SUB,'rb').read(); ct='text/plain; charset=utf-8'; status=200
+   elif p in ('/singbox','/singbox.json'): data=json.dumps(config(),ensure_ascii=False,indent=2).encode(); ct='application/json; charset=utf-8'; status=200
+   else: self.send_error(404); return
+  except Exception as e: data=json.dumps({'error':str(e)}).encode(); ct='application/json'; status=500
+  self.send_response(status); self.send_header('Content-Type',ct); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
+ def log_message(self,*a): pass
+class S(socketserver.ThreadingMixIn,socketserver.TCPServer): allow_reuse_address=True; daemon_threads=True
+with S(('',PORT),H) as s: s.serve_forever()
+PYEOF
+chmod 600 "$PY"
+systemctl restart hugo-sub
+sleep 1
+if ! systemctl is-active --quiet hugo-sub; then echo '订阅服务启动失败，请查看 systemctl status hugo-sub'; exit 1; fi
+echo '完成：未修改 /etc/sing-box/config.json，也未重置任何节点凭证。'
+echo '原11节点订阅：http://服务器公网IP:2082/sub'
+echo 'sing-box配置订阅：http://服务器公网IP:2082/singbox'
+echo '请确保 TCP 2082 端口已开放；导入前可先在浏览器打开 /singbox 检查是否返回 JSON。'
