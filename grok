@@ -556,3 +556,241 @@ $SOCKS_LINK"
         "Hugo-TuicV5",
         "Hugo-Shadowsocks-2022",
         "Hugo-Shadowsocks-Classic",
+        "Hugo-Trojan",
+        "Hugo-Socks5-Mixed"
+      ],
+      "url": "https://www.gstatic.com/generate_204",
+      "interval": "5m",
+      "tolerance": 50
+    },
+    {
+      "type": "vless",
+      "tag": "Hugo-Reality-TCP",
+      "server": "$IP",
+      "server_port": 443,
+      "uuid": "$UUID",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "$SNI",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "Hugo-Reality-gRPC",
+      "server": "$IP",
+      "server_port": 444,
+      "uuid": "$UUID",
+      "tls": {
+        "enabled": true,
+        "server_name": "$SNI",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
+      },
+      "transport": {
+        "type": "grpc",
+        "service_name": "hugogrpc"
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "Hugo-XTLS-Reality-8881",
+      "server": "$IP",
+      "server_port": 8881,
+      "uuid": "$UUID",
+      "flow": "xtls-rprx-vision",
+      "tls": {
+        "enabled": true,
+        "server_name": "$SNI",
+        "utls": {
+          "enabled": true,
+          "fingerprint": "chrome"
+        },
+        "reality": {
+          "enabled": true,
+          "public_key": "$PUB_KEY",
+          "short_id": "$SHORT_ID"
+        }
+      }
+    },
+    {
+      "type": "vmess",
+      "tag": "Hugo-VMess",
+      "server": "$IP",
+      "server_port": 3443,
+      "uuid": "$VMESS_UUID",
+      "security": "auto",
+      "alter_id": 0
+    },
+    {
+      "type": "trojan",
+      "tag": "Hugo-AnyTLS",
+      "server": "$IP",
+      "server_port": 10000,
+      "password": "$ANYTLS_PASS",
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true
+      }
+    },
+    {
+      "type": "hysteria2",
+      "tag": "Hugo-Hysteria2",
+      "server": "$IP",
+      "server_port": 8443,
+      "password": "$HY2_PASS",
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true,
+        "alpn": ["h3"]
+      }
+    },
+    {
+      "type": "tuic",
+      "tag": "Hugo-TuicV5",
+      "server": "$IP",
+      "server_port": 9443,
+      "uuid": "$UUID",
+      "password": "$TUIC_PASS",
+      "congestion_control": "bbr",
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true,
+        "alpn": ["h3"]
+      }
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "Hugo-Shadowsocks-2022",
+      "server": "$IP",
+      "server_port": 6443,
+      "method": "2022-blake3-aes-128-gcm",
+      "password": "$SS_PASS"
+    },
+    {
+      "type": "shadowsocks",
+      "tag": "Hugo-Shadowsocks-Classic",
+      "server": "$IP",
+      "server_port": 6555,
+      "method": "aes-256-gcm",
+      "password": "$SS_CLASSIC_PASS"
+    },
+    {
+      "type": "trojan",
+      "tag": "Hugo-Trojan",
+      "server": "$IP",
+      "server_port": 7443,
+      "password": "$TROJAN_PASS",
+      "tls": {
+        "enabled": true,
+        "server_name": "bing.com",
+        "insecure": true
+      }
+    },
+    {
+      "type": "socks",
+      "tag": "Hugo-Socks5-Mixed",
+      "server": "$IP",
+      "server_port": 5443,
+      "username": "$PROXY_USER",
+      "password": "$PROXY_PASS",
+      "version": "5"
+    },
+    {
+      "type": "direct",
+      "tag": "direct"
+    },
+    {
+      "type": "block",
+      "tag": "block"
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "protocol": "dns",
+        "outbound": "direct"
+      },
+      {
+        "ip_is_private": true,
+        "outbound": "direct"
+      }
+    ],
+    "final": "proxy",
+    "auto_detect_interface": true
+  },
+  "experimental": {
+    "cache_file": {
+      "enabled": true
+    }
+  }
+}
+SBJSON
+
+    # 启动/配置 HTTP 订阅服务
+    setup_sub_service
+
+    echo "✅ 部署完成！"
+    echo ""
+    show_nodes
+}
+
+# --- 核心逻辑判断 ---
+if [ "$1" == "install" ] || [ "$1" == "2" ]; then
+    install_nodes
+    exit 0
+fi
+
+if [ "$1" == "uninstall" ] || [ "$1" == "3" ]; then
+    uninstall_nodes
+    exit 0
+fi
+
+# 交互菜单
+echo "============================================================"
+echo "          Hugo sing-box 多协议一键管理脚本                  "
+echo "============================================================"
+echo "  1. 查看当前节点信息及订阅链接"
+echo "  2. 全新部署 / 重置 11 大协议节点（生成新配置及订阅）"
+echo "  3. 彻底卸载 sing-box 及清除所有服务"
+echo "  0. 退出"
+echo "============================================================"
+read -p "请输入数字选择 [0-3]: " CHOICE
+
+case "$CHOICE" in
+    1)
+        show_nodes
+        ;;
+    2)
+        install_nodes
+        ;;
+    3)
+        uninstall_nodes
+        ;;
+    0)
+        exit 0
+        ;;
+    *)
+        echo "❌ 无效输入，脚本已退出。"
+        exit 1
+        ;;
+esac
