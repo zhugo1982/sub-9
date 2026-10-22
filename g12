@@ -165,9 +165,8 @@ install_nodes() {
     PROXY_USER="hugo"
     PROXY_PASS=$(openssl rand -hex 6)
 
-    # 第12个协议：ShadowTLS v3 + 独立 Shadowsocks 后端
-    SHADOWTLS_PASS=$(openssl rand -hex 16)
-    SS_SHADOWTLS_PASS=$(openssl rand -hex 16)
+    # 第12个协议：标准 Shadowsocks（v2rayN 可通过普通 ss:// 订阅导入）
+    SS12_PASS=$(openssl rand -hex 16)
 
     SHORT_ID="0123456789abcdef"
     SNI="gateway.icloud.com"
@@ -389,30 +388,12 @@ install_nodes() {
       ]
     },
     {
-      "type": "shadowtls",
-      "tag": "shadowtls-in",
+      "type": "shadowsocks",
+      "tag": "shadowsocks-12",
       "listen": "0.0.0.0",
       "listen_port": 8444,
-      "version": 3,
-      "users": [
-        {
-          "name": "hugo-shadowtls",
-          "password": "$SHADOWTLS_PASS"
-        }
-      ],
-      "handshake": {
-        "server": "$SNI",
-        "server_port": 443
-      },
-      "detour": "ss-shadowtls-in"
-    },
-    {
-      "type": "shadowsocks",
-      "tag": "ss-shadowtls-in",
-      "listen": "127.0.0.1",
-      "listen_port": 10086,
       "method": "aes-256-gcm",
-      "password": "$SS_SHADOWTLS_PASS"
+      "password": "$SS12_PASS"
     }
   ],
   "outbounds": [
@@ -445,38 +426,10 @@ CONFIG
     TROJAN_LINK="trojan://$TROJAN_PASS@$IP:7443?security=tls&allowInsecure=1#Hugo-Trojan"
     SOCKS_LINK="socks://$PROXY_USER:$PROXY_PASS@$IP:5443#Hugo-Socks5-Mixed"
 
-    # ShadowTLS 客户端配置（sing-box 格式；需导入客户端，不能作为普通 URI 节点使用）
-    cat > /etc/sing-box/shadowtls-client.json << CLIENTJSON
-{
-  "log": { "level": "warn" },
-  "inbounds": [
-    { "type": "mixed", "tag": "local-proxy", "listen": "127.0.0.1", "listen_port": 20808 }
-  ],
-  "outbounds": [
-    {
-      "type": "shadowsocks",
-      "tag": "shadowtls-ss-out",
-      "server": "$IP",
-      "server_port": 8444,
-      "method": "aes-256-gcm",
-      "password": "$SS_SHADOWTLS_PASS",
-      "detour": "shadowtls-out"
-    },
-    {
-      "type": "shadowtls",
-      "tag": "shadowtls-out",
-      "server": "$IP",
-      "server_port": 8444,
-      "version": 3,
-      "password": "$SHADOWTLS_PASS",
-      "tls": { "enabled": true, "server_name": "$SNI" }
-    },
-    { "type": "direct", "tag": "direct" }
-  ],
-  "route": { "final": "shadowtls-ss-out" }
-}
-CLIENTJSON
-    chmod 600 /etc/sing-box/shadowtls-client.json
+    # 第12个标准 Shadowsocks 分享链接，加入同一个 Base64 订阅
+    SS12_RAW="aes-256-gcm:$SS12_PASS"
+    SS12_ENCODED=$(echo -n "$SS12_RAW" | base64 | tr -d '\n')
+    SS12_LINK="ss://$SS12_ENCODED@$IP:8444#Hugo-Shadowsocks-12"
 
     SS_2022_RAW="2022-blake3-aes-128-gcm:$SS_PASS"
     SS_2022_ENCODED=$(echo -n "$SS_2022_RAW" | base64 | tr -d '\n')
@@ -521,16 +474,10 @@ $TROJAN_LINK
 [11] SOCKS5/HTTP Mixed (5443):
 $SOCKS_LINK
 ------------------------------------------------------------
-[12] ShadowTLS v3 + Shadowsocks (8444):
-服务器地址：$IP
-服务器端口：8444
-ShadowTLS 版本：3
-ShadowTLS 密码：$SHADOWTLS_PASS
-底层 Shadowsocks：aes-256-gcm
-底层 Shadowsocks 密码：$SS_SHADOWTLS_PASS
-握手域名：$SNI
-客户端配置文件：/etc/sing-box/shadowtls-client.json
-说明：此节点请导入 sing-box 客户端 JSON 配置；不是普通 vless:// 或 ss:// 单链接。
+[12] Shadowsocks (8444):
+$SS12_LINK
+加密方式：aes-256-gcm
+说明：标准 ss:// 分享链接，可随其余节点一起通过 v2rayN 订阅导入。
 ============================================================
 LINKS
 
@@ -545,7 +492,8 @@ $TUIC_LINK
 $SS_LINK
 $SS_CLASSIC_LINK
 $TROJAN_LINK
-$SOCKS_LINK"
+$SOCKS_LINK
+$SS12_LINK"
     
     echo -n "$RAW_SUBS" | base64 | tr -d '\n' > "$SUB_FILE"
 
@@ -553,8 +501,7 @@ $SOCKS_LINK"
     setup_sub_service
 
     echo "✅ 部署完成！"
-    echo "ShadowTLS 客户端配置已写入：/etc/sing-box/shadowtls-client.json"
-    echo "注意：ShadowTLS 配置不属于通用 URI 订阅；请单独导入该 JSON。"
+    echo "第12个节点已使用标准 Shadowsocks，已加入同一个 v2rayN 订阅。"
     echo ""
     show_nodes
 }
@@ -575,7 +522,7 @@ echo "============================================================"
 echo "          Hugo sing-box 多协议一键管理脚本                  "
 echo "============================================================"
 echo "  1. 查看当前节点信息及订阅链接"
-echo "  2. 全新部署 / 重置 12 个协议节点（生成新配置及订阅）"
+echo "  2. 全新部署 / 重置 12 个节点（生成新配置及订阅）"
 echo "  3. 彻底卸载 sing-box 及清除所有服务"
 echo "  0. 退出"
 echo "============================================================"
